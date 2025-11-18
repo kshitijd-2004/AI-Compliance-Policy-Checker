@@ -1,0 +1,7 @@
+Architecture
+project_idea
+app/test_db.py
+.venv/
+__pycache__/
+.env
+.env.local
