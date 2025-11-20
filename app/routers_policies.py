@@ -5,6 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app import models, schemas
+from app.ingestion import ingest_policy_document
+
 
 router = APIRouter(prefix="/policies", tags=["policies"])
 
@@ -56,6 +58,8 @@ async def upload_policy(
     db.commit()
     db.refresh(doc)
 
+    ingest_policy_document(db, doc.id)
+    
     return doc
 
 

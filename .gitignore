@@ -5,3 +5,4 @@ app/test_db.py
 __pycache__/
 .env
 .env.local
+storage
