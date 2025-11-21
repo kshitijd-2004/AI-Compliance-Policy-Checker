@@ -71,3 +71,4 @@ def list_policies(db: Session = Depends(get_db)):
         .all()
     )
     return docs
+

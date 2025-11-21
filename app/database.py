@@ -1,13 +1,16 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from .models import Base
 
 
 class Settings(BaseSettings):
     DATABASE_URL: str
-    class Config:
-        env_file = ".env"
+
+    model_config = SettingsConfigDict(
+        extra='ignore', 
+        env_file=".env",
+        )
 
 
 settings = Settings()

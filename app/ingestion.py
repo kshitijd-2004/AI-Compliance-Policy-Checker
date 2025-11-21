@@ -2,6 +2,8 @@ from typing import List
 from app import models
 import fitz
 from sqlalchemy.orm import Session
+from app.vectorstore import index_policy_chunks
+
 
 def extract_text_from_pdf(file_path: str) -> str:
     """Extract text from a PDF file using PyMuPDF (fitz)"""
@@ -62,4 +64,14 @@ def ingest_policy_document(db: Session, document_id: int) -> None:
         db.add(policy_chunk)
 
     db.commit()
+
+    # store doc chunks in Pinecone
+    db.refresh(doc)
+    doc_chunks = (
+        db.query(models.PolicyChunk)
+        .filter(models.PolicyChunk.document_id == document_id)
+        .all()
+    )
+    index_policy_chunks(doc_chunks)
+
 
