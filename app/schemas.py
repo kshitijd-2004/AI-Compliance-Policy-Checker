@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 from pydantic import BaseModel, ConfigDict
 from app.models import PolicyType
@@ -21,3 +21,23 @@ class PolicyDocumentRead(PolicyDocumentBase):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ComplianceIssue(BaseModel):
+    type: str
+    policy_reference: Optional[str] = None
+    excerpt: Optional[str] = None
+    explanation: str
+
+
+class ComplianceCheckRequest(BaseModel):
+    text: str
+    department: Optional[str] = None
+    policy_type: Optional[PolicyType] = None
+    top_k: int = 8  # how many chunks to retrieve
+
+
+class ComplianceCheckResponse(BaseModel):
+    overall_risk: str  # e.g. "LOW" | "MEDIUM" | "HIGH" | "NONE"
+    issues: List[ComplianceIssue]
+    suggested_text: Optional[str] = None
