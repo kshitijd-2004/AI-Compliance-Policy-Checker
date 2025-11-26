@@ -6,7 +6,7 @@ from app.database import SessionLocal
 from app import schemas
 from app.vectorstore import query_policy_chunks
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
+from app import models
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
 
@@ -58,6 +58,19 @@ async def check_compliance(
             issues=[],
             suggested_text=None,
         )
+
+        # log no matches case too
+        db_obj = models.ComplianceCheck(
+            text=body.text,
+            department=body.department,
+            policy_type=body.policy_type,
+            overall_risk=resp.overall_risk,
+            issues=[],
+            suggested_text=None,
+        )
+        db.add(db_obj)
+        db.commit()
+        return resp
 
     # Build a context string from retrieved chunks
     context_snippets = []
@@ -127,5 +140,29 @@ Policy context:
             status_code=500,
             detail="Model returned invalid JSON for compliance result",
         )
+    
+    # Log the compliance check in the database
+    db_obj = models.ComplianceCheck(
+        text=body.text,
+        department=body.department,
+        policy_type=body.policy_type,
+        overall_risk=resp.overall_risk,
+        issues=[i.model_dump() for i in resp.issues] if resp.issues else [],
+        suggested_text=resp.suggested_text,
+    )
+    db.add(db_obj)
+    db.commit()
 
     return resp
+
+@router.get("/logs", response_model=list[schemas.ComplianceCheckLog])
+def list_compliance_logs(db: Session = Depends(get_db)):
+    logs = (
+        db.query(models.ComplianceCheck)
+        .order_by(models.ComplianceCheck.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    return logs
+
+

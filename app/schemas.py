@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Any
 
 from pydantic import BaseModel, ConfigDict
 from app.models import PolicyType
@@ -41,3 +41,18 @@ class ComplianceCheckResponse(BaseModel):
     overall_risk: str  # e.g. "LOW" | "MEDIUM" | "HIGH" | "NONE"
     issues: List[ComplianceIssue]
     suggested_text: Optional[str] = None
+
+class ComplianceCheckLog(BaseModel):
+    id: int
+    created_at: datetime
+    text: str
+    department: str | None
+    policy_type: PolicyType | None
+    overall_risk: str
+    issues: Any | None
+    suggested_text: str | None
+
+    model_config = ConfigDict( 
+        from_attributes = True   # so we can return ORM model instances
+    )
+           

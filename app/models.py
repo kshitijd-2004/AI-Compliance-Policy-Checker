@@ -1,8 +1,9 @@
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import ForeignKey, String, Text, DateTime, Enum as SAEnum
+from sqlalchemy import ForeignKey, String, Text, DateTime, func, Enum as SAEnum
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import JSONB
 import enum
 
 
@@ -66,8 +67,23 @@ class ComplianceCheck(Base):
     __tablename__ = "compliance_checks"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    input_text: Mapped[str] = mapped_column(Text)
-    content_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    overall_risk: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-    issues_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    text: Mapped[str] = mapped_column(Text, nullable=False)    
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    department: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    policy_type: Mapped["PolicyType | None"] = mapped_column(
+        SAEnum(PolicyType),
+        nullable=True,
+    )
+
+    # model’s judgement
+    overall_risk: Mapped[str] = mapped_column(String(20), nullable=False)
+
+    # store issues as JSON blob
+    issues: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+
+    # suggested rewrite
+    suggested_text: Mapped[str | None] = mapped_column(Text, nullable=True)
