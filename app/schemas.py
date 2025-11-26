@@ -34,7 +34,7 @@ class ComplianceCheckRequest(BaseModel):
     text: str
     department: Optional[str] = None
     policy_type: Optional[PolicyType] = None
-    top_k: int = 8  # how many chunks to retrieve
+    top_k: int = 5  # how many chunks to retrieve
 
 
 class ComplianceCheckResponse(BaseModel):
@@ -46,10 +46,10 @@ class ComplianceCheckLog(BaseModel):
     id: int
     created_at: datetime
     text: str
-    department: str | None
-    policy_type: PolicyType | None
+    department: Optional[str] = None
+    policy_type: Optional[PolicyType] = None
     overall_risk: str
-    issues: Any | None
+    issues: Optional[List[ComplianceIssue]] = None
     suggested_text: str | None
 
     model_config = ConfigDict( 

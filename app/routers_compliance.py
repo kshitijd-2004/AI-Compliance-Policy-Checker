@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from openai import OpenAI
@@ -24,6 +26,58 @@ class LLMSettings(BaseSettings):
 llm_settings = LLMSettings()
 llm_client = OpenAI(api_key=llm_settings.OPENAI_API_KEY)
 
+
+def classify_context_with_llm(text: str) -> tuple[str | None, models.PolicyType | None]:
+    """
+    Use the LLM to infer department and policy_type from the user's text.
+    Returns (department, policy_type_enum_or_None).
+    """
+    prompt = f"""
+You are a classifier for an AI compliance system.
+
+Given a piece of text, infer:
+- which department it most likely belongs to (e.g. "Sales", "Support", "HR", "Legal", "Marketing")
+- which policy_type applies, from this fixed list:
+  ["confidentiality", "external_communication", "data_privacy", "security", "hr"]
+
+If you are unsure about a field, set it to null.
+
+Return ONLY a JSON object with this exact shape:
+
+{{
+  "department": "Sales" | "Support" | "HR" | "Legal" | "Marketing" | null,
+  "policy_type": "confidentiality" | "external_communication" | "data_privacy" | "security" | "hr" | null
+}}
+
+Text:
+\"\"\"{text}\"\"\"    
+"""
+
+    completion = llm_client.chat.completions.create(
+        model="gpt-4.1-mini",
+        messages=[
+            {"role": "system", "content": "You classify text into department and policy_type for compliance checks."},
+            {"role": "user", "content": prompt},
+        ],
+        response_format={"type": "json_object"},
+    )
+
+    content = completion.choices[0].message.content
+    data = json.loads(content) if hasattr(schemas, "json") else __import__("json").loads(content)
+
+    department = data.get("department")
+    policy_type_str = data.get("policy_type")
+
+    policy_type_enum: models.PolicyType | None = None
+    if policy_type_str:
+        try:
+            policy_type_enum = models.PolicyType(policy_type_str)
+        except ValueError:
+            policy_type_enum = None
+
+    return department, policy_type_enum
+
+
 def get_db():
     db = SessionLocal()
     try:
@@ -32,47 +86,58 @@ def get_db():
         db.close()
 
 
+
 @router.post("/check", response_model=schemas.ComplianceCheckResponse)
 async def check_compliance(
     body: schemas.ComplianceCheckRequest,
     db: Session = Depends(get_db),
 ):
-    # Build Pinecone filters if department / policy_type are provided
-    filters = {}
-    if body.department:
-        filters["department"] = body.department
-    if body.policy_type:
-        filters["policy_type"] = body.policy_type.value
+    # 1) Decide effective department / policy_type (user override > model)
+    inferred_department = None
+    inferred_policy_type: models.PolicyType | None = None
 
+    if not body.department or not body.policy_type:
+        inferred_department, inferred_policy_type = classify_context_with_llm(body.text)
 
+    effective_department = body.department or inferred_department
+    effective_policy_type = body.policy_type or inferred_policy_type
+
+    # 2) Build Pinecone filters from effective values
+    filters: dict[str, str] = {}
+    if effective_department:
+        filters["department"] = effective_department
+    if effective_policy_type:
+        filters["policy_type"] = effective_policy_type.value
+
+    # 3) Query Pinecone
     matches = query_policy_chunks(
         query=body.text,
         top_k=body.top_k,
-        filters=filters,
+        filters=filters if filters else None,
     )
 
+    # 4) If no matches, still log a "NONE" risk check
     if not matches:
-        # No relevant chunks found; return "NONE" risk with empty issues
-        return schemas.ComplianceCheckResponse(
+        resp = schemas.ComplianceCheckResponse(
             overall_risk="NONE",
             issues=[],
             suggested_text=None,
         )
 
-        # log no matches case too
         db_obj = models.ComplianceCheck(
             text=body.text,
-            department=body.department,
-            policy_type=body.policy_type,
+            department=effective_department,
+            policy_type=effective_policy_type,
             overall_risk=resp.overall_risk,
             issues=[],
             suggested_text=None,
         )
         db.add(db_obj)
         db.commit()
+
         return resp
 
-    # Build a context string from retrieved chunks
+    # 5) Build context from matches
     context_snippets = []
     for m in matches:
         meta = m.metadata or {}
@@ -81,7 +146,7 @@ async def check_compliance(
 
     context_text = "\n\n".join(context_snippets)
 
-    # Call LLM to do compliance analysis
+    # 6) Ask LLM to analyze compliance
     prompt = f"""
 You are a compliance assistant. Given:
 
@@ -116,8 +181,9 @@ Return ONLY a JSON object with this structure:
 User text:
 \"\"\"{body.text}\"\"\"
 
+
 Policy context:
-\"\"\"{context_text}\"\"\"
+\"\"\"{context_text}\"\"\"    
 """
 
     completion = llm_client.chat.completions.create(
@@ -131,21 +197,19 @@ Policy context:
 
     raw_json = completion.choices[0].message.content
 
-    # Let Pydantic validate/parse it into our schema
     try:
-        # mypy-unsafe but fine here: parse_raw is on BaseModel
         resp = schemas.ComplianceCheckResponse.model_validate_json(raw_json)
     except Exception:
         raise HTTPException(
             status_code=500,
             detail="Model returned invalid JSON for compliance result",
         )
-    
-    # Log the compliance check in the database
+
+    # 7) Log the compliance check with effective filters
     db_obj = models.ComplianceCheck(
         text=body.text,
-        department=body.department,
-        policy_type=body.policy_type,
+        department=effective_department,
+        policy_type=effective_policy_type,
         overall_risk=resp.overall_risk,
         issues=[i.model_dump() for i in resp.issues] if resp.issues else [],
         suggested_text=resp.suggested_text,
@@ -154,6 +218,7 @@ Policy context:
     db.commit()
 
     return resp
+
 
 @router.get("/logs", response_model=list[schemas.ComplianceCheckLog])
 def list_compliance_logs(db: Session = Depends(get_db)):
