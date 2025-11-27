@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional, List, Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from app.models import PolicyType
 
 
@@ -35,6 +35,15 @@ class ComplianceCheckRequest(BaseModel):
     department: Optional[str] = None
     policy_type: Optional[PolicyType] = None
     top_k: int = 5  # how many chunks to retrieve
+
+    @field_validator("text")
+    @classmethod
+    def validate_text(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Text must not be empty")
+        if len(v) > 8000:
+            raise ValueError("Text must not exceed 8000 characters")
+        return v
 
 
 class ComplianceCheckResponse(BaseModel):

@@ -1,6 +1,7 @@
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from openai import OpenAI
 
@@ -92,6 +93,14 @@ async def check_compliance(
     body: schemas.ComplianceCheckRequest,
     db: Session = Depends(get_db),
 ):
+    # 0) Check if there's at least one policy document in the DB
+    policy_count = db.scalar(select(func.count(models.PolicyDocument.id)))
+    if not policy_count:
+        raise HTTPException(
+            status_code=400,
+            detail="No policy documents found. Please upload at least one policy before running compliance checks.",
+        )
+    
     # 1) Decide effective department / policy_type (user override > model)
     inferred_department = None
     inferred_policy_type: models.PolicyType | None = None
@@ -110,11 +119,19 @@ async def check_compliance(
         filters["policy_type"] = effective_policy_type.value
 
     # 3) Query Pinecone
-    matches = query_policy_chunks(
-        query=body.text,
-        top_k=body.top_k,
-        filters=filters if filters else None,
-    )
+    try:
+        matches = query_policy_chunks(
+            query=body.text,
+            top_k=body.top_k,
+            filters=filters if filters else None,
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=503,
+            detail="Vector retrieval service (Pinecone) is unavailable or failed.",
+        )
+
 
     # 4) If no matches, still log a "NONE" risk check
     if not matches:
@@ -185,15 +202,20 @@ User text:
 Policy context:
 \"\"\"{context_text}\"\"\"    
 """
-
-    completion = llm_client.chat.completions.create(
-        model="gpt-4.1-mini",
-        messages=[
-            {"role": "system", "content": "You are a strict compliance reviewer."},
-            {"role": "user", "content": prompt},
-        ],
-        response_format={"type": "json_object"},
-    )
+    try:
+        completion = llm_client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[
+                {"role": "system", "content": "You are a strict compliance reviewer."},
+                {"role": "user", "content": prompt},
+            ],
+            response_format={"type": "json_object"},
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail="LLM service (OpenAI) failed while performing compliance analysis.",
+        )
 
     raw_json = completion.choices[0].message.content
 
