@@ -1,15 +1,16 @@
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from openai import OpenAI
 
 from app.database import SessionLocal
-from app import schemas
+from app import schemas, models
 from app.vectorstore import query_policy_chunks
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from app import models
+
 
 router = APIRouter(prefix="/compliance", tags=["compliance"])
 
@@ -243,13 +244,44 @@ Policy context:
 
 
 @router.get("/logs", response_model=list[schemas.ComplianceCheckLog])
-def list_compliance_logs(db: Session = Depends(get_db)):
+def list_compliance_logs(
+    department: Optional[str] = Query(default=None),
+    risk: Optional[str] = Query(default=None, alias="overall_risk"),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    ):
+
+    q = db.query(models.ComplianceCheck)
+
+    if department: # filter bt department
+        q = q.filter(models.ComplianceCheck.department == department)
+
+    if risk: # filter by overall_risk
+        q = q.filter(models.ComplianceCheck.overall_risk == risk.upper())
+
+
     logs = (
-        db.query(models.ComplianceCheck)
-        .order_by(models.ComplianceCheck.created_at.desc())
-        .limit(100)
+        q.order_by(models.ComplianceCheck.created_at.desc())
+        .limit(limit)
         .all()
     )
     return logs
+
+@router.get("/logs/{log_id}", response_model=schemas.ComplianceCheckLog)
+def get_compliance_log(
+    log_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    Fetch a single compliance check log by ID.
+    """
+    log = db.query(models.ComplianceCheck).get(log_id)
+    if not log:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Compliance check with id={log_id} not found.",
+        )
+    return log
+
 
 

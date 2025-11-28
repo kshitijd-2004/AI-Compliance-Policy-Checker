@@ -59,7 +59,7 @@ class ComplianceCheckLog(BaseModel):
     policy_type: Optional[PolicyType] = None
     overall_risk: str
     issues: Optional[List[ComplianceIssue]] = None
-    suggested_text: str | None
+    suggested_text: Optional[str] = None
 
     model_config = ConfigDict( 
         from_attributes = True   # so we can return ORM model instances
