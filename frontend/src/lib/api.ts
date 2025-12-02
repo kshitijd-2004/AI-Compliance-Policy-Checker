@@ -1,6 +1,6 @@
 import { format } from "date-fns";
 
-export type PolicyType = 
+export type PolicyType =
   | "confidentiality"
   | "external_communication"
   | "data_privacy"
@@ -41,169 +41,120 @@ export interface ComplianceCheckLog {
   suggested_text?: string | null;
 }
 
-// Mock Data Store
-let policies: PolicyDocument[] = [
-  {
-    id: 1,
-    title: "Data Privacy Policy 2024",
-    file_path: "/storage/policies/privacy_2024.pdf",
-    policy_type: "data_privacy",
-    department: "Legal",
-    version: "1.2",
-    created_at: new Date(Date.now() - 10000000).toISOString(),
-  },
-  {
-    id: 2,
-    title: "Social Media Guidelines",
-    file_path: "/storage/policies/social_media.pdf",
-    policy_type: "external_communication",
-    department: "Marketing",
-    version: "2.0",
-    created_at: new Date(Date.now() - 5000000).toISOString(),
-  },
-  {
-    id: 3,
-    title: "IT Security Standards",
-    file_path: "/storage/policies/security.pdf",
-    policy_type: "security",
-    department: "IT",
-    version: "1.0",
-    created_at: new Date(Date.now() - 20000000).toISOString(),
-  }
-];
+/* ---------- Base config ---------- */
 
-let logs: ComplianceCheckLog[] = [
-  {
-    id: 101,
-    created_at: new Date(Date.now() - 3600000).toISOString(),
-    text: "We are excited to announce our new partnership with Acme Corp! The deal is worth $5M.",
-    department: "Sales",
-    policy_type: "external_communication",
-    overall_risk: "HIGH",
-    issues: [
-      {
-        type: "Confidentiality",
-        policy_reference: "Ext. Comm Policy §4.1",
-        excerpt: "The deal is worth $5M",
-        explanation: "Financial details of partnerships are confidential until official press release."
-      }
-    ],
-    suggested_text: "We are excited to announce our new partnership with Acme Corp! This strategic alliance will bring great value."
-  },
-  {
-    id: 102,
-    created_at: new Date(Date.now() - 7200000).toISOString(),
-    text: "Hey team, remember to change your passwords by Friday.",
-    department: "IT",
-    policy_type: "security",
-    overall_risk: "NONE",
-    issues: [],
-    suggested_text: null
-  },
-  {
-    id: 103,
-    created_at: new Date(Date.now() - 86400000).toISOString(),
-    text: "Customer John Doe (SSN: 123-45-6789) requested a refund.",
-    department: "Support",
-    policy_type: "data_privacy",
-    overall_risk: "HIGH",
-    issues: [
-      {
-        type: "PII Violation",
-        policy_reference: "Data Privacy Act §2",
-        excerpt: "SSN: 123-45-6789",
-        explanation: "Never share full SSNs in support tickets or internal chats."
-      }
-    ],
-    suggested_text: "Customer John Doe (ID: ****6789) requested a refund."
-  }
-];
+// Use Vite environment variable if set, otherwise default to localhost
+const API_BASE =
+  import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
 
-// Mock API Functions
+/**
+ * Helper for JSON requests to the FastAPI backend.
+ */
+async function request<T>(
+  path: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    // Let caller override headers if needed (e.g., FormData)
+    headers: {
+      ...(options.body instanceof FormData
+        ? {}
+        : { "Content-Type": "application/json" }),
+      ...(options.headers ?? {}),
+    },
+    ...options,
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `Request failed: ${res.status} ${res.statusText} ${text || ""}`.trim()
+    );
+  }
+
+  // Some endpoints might return no content
+  if (res.status === 204) return undefined as unknown as T;
+
+  return (await res.json()) as T;
+}
+
+/* ---------- API surface used by your React app ---------- */
+
 export const api = {
-  checkCompliance: async (text: string, department?: string, policy_type?: string): Promise<ComplianceCheckResponse> => {
-    await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate network delay
-
-    // Simple keyword-based mock logic for demo purposes
-    const lowerText = text.toLowerCase();
-    let risk: "NONE" | "LOW" | "MEDIUM" | "HIGH" = "NONE";
-    const issues: ComplianceIssue[] = [];
-    let suggested_text = null;
-
-    if (lowerText.includes("ssn") || lowerText.includes("password") || lowerText.includes("secret")) {
-      risk = "HIGH";
-      issues.push({
-        type: "Security Violation",
-        policy_reference: "Security Policy §1.2",
-        excerpt: "secret/password/ssn",
-        explanation: "Sensitive information detected. Do not share credentials or PII."
-      });
-      suggested_text = text.replace(/ssn|password|secret/gi, "[REDACTED]");
-    } else if (lowerText.includes("promise") || lowerText.includes("guarantee")) {
-      risk = "MEDIUM";
-      issues.push({
-        type: "Liability Risk",
-        policy_reference: "External Comm §3.5",
-        excerpt: "guarantee/promise",
-        explanation: "Avoid making absolute guarantees that create legal liability."
-      });
-      suggested_text = text.replace(/guarantee|promise/gi, "strive to ensure");
-    } else if (lowerText.includes("urgent") || lowerText.includes("asap")) {
-      risk = "LOW";
-      issues.push({
-        type: "Tone Check",
-        policy_reference: "HR Communication Guidelines",
-        excerpt: "urgent/asap",
-        explanation: "Consider a more collaborative tone."
-      });
-      suggested_text = text.replace(/urgent|asap/gi, "when possible");
-    }
-
-    // Log the check
-    const newLog: ComplianceCheckLog = {
-      id: Math.floor(Math.random() * 10000),
-      created_at: new Date().toISOString(),
-      text,
-      department,
-      policy_type: policy_type as PolicyType,
-      overall_risk: risk,
-      issues,
-      suggested_text
-    };
-    logs.unshift(newLog);
-
-    return {
-      overall_risk: risk,
-      issues,
-      suggested_text
-    };
+  /** Run a compliance check on a piece of text. */
+  checkCompliance: async (
+    text: string,
+    department?: string,
+    policy_type?: string
+  ): Promise<ComplianceCheckResponse> => {
+    return request<ComplianceCheckResponse>("/compliance/check", {
+      method: "POST",
+      body: JSON.stringify({
+        text,
+        department: department || null,
+        policy_type: policy_type || null,
+      }),
+    });
   },
 
-  getLogs: async (department?: string, risk?: string): Promise<ComplianceCheckLog[]> => {
-    await new Promise(resolve => setTimeout(resolve, 600));
-    let filtered = [...logs];
-    if (department) filtered = filtered.filter(l => l.department === department);
-    if (risk) filtered = filtered.filter(l => l.overall_risk === risk);
-    return filtered;
+  /** Get compliance logs (optionally filtered by department and/or risk). */
+  getLogs: async (
+    department?: string,
+    risk?: "NONE" | "LOW" | "MEDIUM" | "HIGH"
+  ): Promise<ComplianceCheckLog[]> => {
+    const params = new URLSearchParams();
+    if (department) params.set("department", department);
+    if (risk) params.set("risk", risk);
+
+    const query = params.toString();
+    const path = `/compliance/logs${query ? `?${query}` : ""}`;
+
+    return request<ComplianceCheckLog[]>(path);
   },
 
+  /** Get a single log by ID (if you ever need detail view). */
+  getLogById: async (id: number): Promise<ComplianceCheckLog> => {
+    return request<ComplianceCheckLog>(`/compliance/logs/${id}`);
+  },
+
+  /** List all policy documents. */
   getPolicies: async (): Promise<PolicyDocument[]> => {
-    await new Promise(resolve => setTimeout(resolve, 600));
-    return [...policies];
+    return request<PolicyDocument[]>("/policies/");
   },
 
-  uploadPolicy: async (file: File, title: string, type: string, department?: string): Promise<PolicyDocument> => {
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    const newDoc: PolicyDocument = {
-      id: Math.floor(Math.random() * 1000),
-      title,
-      file_path: `/storage/policies/${file.name}`,
-      policy_type: type as PolicyType,
-      department,
-      version: "1.0",
-      created_at: new Date().toISOString()
-    };
-    policies.unshift(newDoc);
-    return newDoc;
-  }
+  /**
+   * Upload a new policy document (multipart form data).
+   * Expects FastAPI handler like:
+   *   file: UploadFile = File(...)
+   *   title: str = Form(...)
+   *   policy_type: PolicyType = Form(...)
+   *   department: str | None = Form(None)
+   */
+  uploadPolicy: async (
+    file: File,
+    title: string,
+    type: PolicyType,
+    department?: string
+  ): Promise<PolicyDocument> => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("title", title);
+    form.append("policy_type", type);
+    if (department) form.append("department", department);
+
+    return request<PolicyDocument>("/policies/", {
+      method: "POST",
+      body: form,
+      // Important: DO NOT manually set Content-Type here; browser will set boundary
+    });
+  },
+
+  /** Backend health check */
+  health: async (): Promise<{
+    status: string;
+    db_ok?: boolean;
+    pinecone_ok?: boolean;
+  }> => {
+    return request("/health");
+  },
 };
