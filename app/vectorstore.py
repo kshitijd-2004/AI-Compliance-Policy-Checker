@@ -66,6 +66,14 @@ def index_policy_chunks(chunks: List[models.PolicyChunk]) -> None:
     # upsert to Pinecone
     index.upsert(vectors=vectors)
 
+def delete_policy_vectors(chunk_ids: List[int]) -> None:
+    """Delete vectors from Pinecone for the given PolicyChunk row IDs."""
+    if not chunk_ids:
+        return
+    vector_ids = [f"chunk-{cid}" for cid in chunk_ids]
+    index.delete(ids=vector_ids)
+
+
 def query_policy_chunks(query: str, top_k: int = 8, filters: Optional[Dict[str, Any]] = None,) -> List[models.PolicyChunk]:
     """Query Pinecone for relevant PolicyChunk rows given a query string."""
     query_emb = embed_texts([query])[0]

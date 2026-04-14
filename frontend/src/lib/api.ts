@@ -149,6 +149,19 @@ export const api = {
     });
   },
 
+  /** Delete a policy document (and its Pinecone vectors). */
+  deletePolicy: async (id: number): Promise<void> => {
+    return request<void>(`/policies/${id}`, { method: "DELETE" });
+  },
+
+  /** Get the URL to view a policy PDF inline in the browser. */
+  viewPolicyUrl: (id: number): string =>
+    `${API_BASE}/policies/${id}/download?inline=true`,
+
+  /** Get the URL to download a policy PDF as an attachment. */
+  downloadPolicyUrl: (id: number): string =>
+    `${API_BASE}/policies/${id}/download`,
+
   /** Backend health check */
   health: async (): Promise<{
     status: string;

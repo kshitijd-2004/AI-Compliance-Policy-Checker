@@ -1,11 +1,13 @@
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app import models, schemas
 from app.ingestion import ingest_policy_document
+from app.vectorstore import delete_policy_vectors
 
 
 router = APIRouter(prefix="/policies", tags=["policies"])
@@ -24,7 +26,7 @@ POLICY_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ---------- Endpoints ----------
-@router.post("/upload", response_model=schemas.PolicyDocumentRead)
+@router.post("/", response_model=schemas.PolicyDocumentRead)
 async def upload_policy(
     title: str = Form(...),
     policy_type: schemas.PolicyType = Form(...),
@@ -71,4 +73,48 @@ def list_policies(db: Session = Depends(get_db)):
         .all()
     )
     return docs
+
+
+@router.delete("/{policy_id}", status_code=204)
+def delete_policy(policy_id: int, db: Session = Depends(get_db)):
+    doc = db.query(models.PolicyDocument).filter(models.PolicyDocument.id == policy_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Policy not found")
+
+    chunk_ids = [c.id for c in doc.chunks]
+    delete_policy_vectors(chunk_ids)
+
+    # Cascade deletes PolicyChunk rows via relationship config
+    db.delete(doc)
+    db.commit()
+
+    # Remove file from disk
+    file_path = Path(doc.file_path)
+    if not file_path.exists():
+        file_path = POLICY_STORAGE_DIR / file_path.name
+    if file_path.exists():
+        file_path.unlink()
+
+
+@router.get("/{policy_id}/download")
+def download_policy(policy_id: int, inline: bool = False, db: Session = Depends(get_db)):
+    doc = db.query(models.PolicyDocument).filter(models.PolicyDocument.id == policy_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Policy not found")
+
+    file_path = Path(doc.file_path)
+    if not file_path.exists():
+        # DB may store a stale absolute path (e.g. project was moved);
+        # fall back to looking up the filename in the current storage dir.
+        file_path = POLICY_STORAGE_DIR / file_path.name
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Policy file not found on disk")
+
+    disposition = "inline" if inline else "attachment"
+    return FileResponse(
+        path=file_path,
+        filename=file_path.name,
+        media_type="application/pdf",
+        content_disposition_type=disposition,
+    )
 

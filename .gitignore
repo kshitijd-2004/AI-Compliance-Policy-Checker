@@ -6,3 +6,6 @@ __pycache__/
 .env
 .env.local
 storage
+app/sentinel_audit.jsonl
+sentinel_audit.jsonl
+mcp_client.py

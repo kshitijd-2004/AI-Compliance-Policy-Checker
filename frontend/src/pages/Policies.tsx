@@ -3,14 +3,26 @@ import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Upload, Download, Clock, Eye } from "lucide-react";
+import { FileText, Upload, Download, Clock, Eye, Trash2 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { format } from "date-fns";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
+import type { PolicyType } from "@/lib/api";
 
 export default function Policies() {
   const { data: policies, refetch } = useQuery({ 
@@ -20,16 +32,52 @@ export default function Policies() {
   const { toast } = useToast();
   const [uploadOpen, setUploadOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  const [title, setTitle] = useState("");
+  const [policyType, setPolicyType] = useState<PolicyType>("hr");
+  const [department, setDepartment] = useState("HR");
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const resetForm = () => {
+    setTitle("");
+    setPolicyType("hr");
+    setDepartment("HR");
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const handleDelete = async (id: number) => {
+    setDeletingId(id);
+    try {
+      await api.deletePolicy(id);
+      await refetch();
+      toast({ title: "Policy Deleted", description: "The policy and its vectors have been removed." });
+    } catch {
+      toast({ title: "Delete Failed", description: "Could not delete the policy.", variant: "destructive" });
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
+    const file = fileRef.current?.files?.[0];
+    if (!file) {
+      toast({ title: "No file selected", description: "Please select a PDF file.", variant: "destructive" });
+      return;
+    }
     setIsUploading(true);
-    // Simulate upload
-    await api.uploadPolicy(new File([], "test"), "New Policy", "security", "IT");
-    await refetch();
-    setIsUploading(false);
-    setUploadOpen(false);
-    toast({ title: "Policy Uploaded", description: "The policy document has been indexed." });
+    try {
+      await api.uploadPolicy(file, title, policyType, department);
+      await refetch();
+      setUploadOpen(false);
+      resetForm();
+      toast({ title: "Policy Uploaded", description: "The policy document has been indexed." });
+    } catch {
+      toast({ title: "Upload Failed", description: "Could not upload the policy.", variant: "destructive" });
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   return (
@@ -57,23 +105,30 @@ export default function Policies() {
             <form onSubmit={handleUpload} className="space-y-4 py-4">
               <div className="space-y-2">
                 <Label>Document Title</Label>
-                <Input placeholder="e.g. Remote Work Policy 2024" required />
+                <Input
+                  placeholder="e.g. Remote Work Policy 2024"
+                  required
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Policy Type</Label>
-                  <Select required defaultValue="hr">
+                  <Select value={policyType} onValueChange={(v) => setPolicyType(v as PolicyType)}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="hr">HR</SelectItem>
                       <SelectItem value="security">Security</SelectItem>
-                      <SelectItem value="legal">Legal</SelectItem>
+                      <SelectItem value="data_privacy">Data Privacy</SelectItem>
+                      <SelectItem value="confidentiality">Confidentiality</SelectItem>
+                      <SelectItem value="external_communication">External Communication</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
                   <Label>Department</Label>
-                  <Select required defaultValue="HR">
+                  <Select value={department} onValueChange={setDepartment}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="HR">HR</SelectItem>
@@ -85,7 +140,7 @@ export default function Policies() {
               </div>
               <div className="space-y-2">
                 <Label>File (PDF)</Label>
-                <Input type="file" accept=".pdf" required />
+                <Input type="file" accept=".pdf" required ref={fileRef} />
               </div>
               <DialogFooter>
                 <Button type="submit" disabled={isUploading}>
@@ -121,14 +176,63 @@ export default function Policies() {
               </div>
 
               <div className="pt-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                <Button variant="secondary" size="sm" className="w-full h-8 text-xs">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="w-full h-8 text-xs"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.open(api.viewPolicyUrl(policy.id), "_blank");
+                  }}
+                >
                   <Eye className="w-3 h-3 mr-2" />
                   View
                 </Button>
-                <Button variant="outline" size="sm" className="w-full h-8 text-xs">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full h-8 text-xs"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const a = document.createElement("a");
+                    a.href = api.downloadPolicyUrl(policy.id);
+                    a.download = "";
+                    a.click();
+                  }}
+                >
                   <Download className="w-3 h-3 mr-2" />
                   Download
                 </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs text-destructive hover:bg-destructive/10"
+                      disabled={deletingId === policy.id}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete "{policy.title}"?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will permanently remove the policy document, its indexed chunks, and all associated vectors from Pinecone. This action cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        onClick={() => handleDelete(policy.id)}
+                      >
+                        {deletingId === policy.id ? "Deleting..." : "Delete"}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </div>
             </CardContent>
           </Card>
