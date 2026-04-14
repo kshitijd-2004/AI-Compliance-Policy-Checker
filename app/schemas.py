@@ -1,15 +1,17 @@
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Optional, List, Any
 
 from pydantic import BaseModel, ConfigDict, field_validator
+
 from app.models import PolicyType
 
 
 class PolicyDocumentBase(BaseModel):
     title: str
     policy_type: PolicyType
-    department: Optional[str] = None
-    version: Optional[str] = None
+    department: str | None = None
+    version: str | None = None
 
 
 class PolicyDocumentCreate(PolicyDocumentBase):
@@ -25,16 +27,16 @@ class PolicyDocumentRead(PolicyDocumentBase):
 
 class ComplianceIssue(BaseModel):
     type: str
-    policy_reference: Optional[str] = None
-    excerpt: Optional[str] = None
+    policy_reference: str | None = None
+    excerpt: str | None = None
     explanation: str
 
 
 class ComplianceCheckRequest(BaseModel):
     text: str
-    department: Optional[str] = None
-    policy_type: Optional[PolicyType] = None
-    top_k: int = 5  # how many chunks to retrieve
+    department: str | None = None
+    policy_type: PolicyType | None = None
+    top_k: int = 5
 
     @field_validator("text")
     @classmethod
@@ -47,21 +49,19 @@ class ComplianceCheckRequest(BaseModel):
 
 
 class ComplianceCheckResponse(BaseModel):
-    overall_risk: str  # e.g. "LOW" | "MEDIUM" | "HIGH" | "NONE"
-    issues: List[ComplianceIssue]
-    suggested_text: Optional[str] = None
+    overall_risk: str
+    issues: list[ComplianceIssue]
+    suggested_text: str | None = None
+
 
 class ComplianceCheckLog(BaseModel):
     id: int
     created_at: datetime
     text: str
-    department: Optional[str] = None
-    policy_type: Optional[PolicyType] = None
+    department: str | None = None
+    policy_type: PolicyType | None = None
     overall_risk: str
-    issues: Optional[List[ComplianceIssue]] = None
-    suggested_text: Optional[str] = None
+    issues: list[ComplianceIssue] | None = None
+    suggested_text: str | None = None
 
-    model_config = ConfigDict( 
-        from_attributes = True   # so we can return ORM model instances
-    )
-           
+    model_config = ConfigDict(from_attributes=True)

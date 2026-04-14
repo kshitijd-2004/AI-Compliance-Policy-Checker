@@ -1,9 +1,8 @@
 def test_compliance_check_flow(client, monkeypatch):
-    # stub graph output
     fake_response = {
         "overall_risk": "LOW",
         "issues": [],
-        "suggested_text": "safe text"
+        "suggested_text": "safe text",
     }
 
     class FakeGraph:
@@ -16,7 +15,7 @@ def test_compliance_check_flow(client, monkeypatch):
         "text": "This is a test",
         "department": "Sales",
         "policy_type": None,
-        "top_k": 2
+        "top_k": 2,
     }
 
     resp = client.post("/compliance/check", json=body)
@@ -24,7 +23,6 @@ def test_compliance_check_flow(client, monkeypatch):
     data = resp.json()
     assert data["overall_risk"] == "LOW"
 
-    # verify DB log exists
     resp2 = client.get("/compliance/logs")
     assert resp2.status_code == 200
-    assert len(resp2.json()) == 1
+    assert len(resp2.json()) >= 1

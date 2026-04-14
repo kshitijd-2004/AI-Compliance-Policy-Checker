@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { api, ComplianceCheckResponse } from "@/lib/api";
+import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -9,17 +9,24 @@ import { Label } from "@/components/ui/label";
 import { RiskBadge } from "@/components/RiskBadge";
 import { Loader2, ArrowRight, CheckCircle2, AlertTriangle, Copy } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+/** Sentinel value for Radix Select (cannot use empty string as value). Maps to null in API. */
+const NONE = "__none__";
 
 export default function Check() {
   const [text, setText] = useState("");
-  const [department, setDepartment] = useState("Sales");
-  const [type, setType] = useState("external_communication");
+  const [department, setDepartment] = useState(NONE);
+  const [type, setType] = useState(NONE);
   const { toast } = useToast();
 
   const mutation = useMutation({
-    mutationFn: () => api.checkCompliance(text, department, type),
+    mutationFn: () =>
+      api.checkCompliance(
+        text,
+        department === NONE ? undefined : department,
+        type === NONE ? undefined : type,
+      ),
     onSuccess: (data) => {
       toast({
         title: "Check Complete",
@@ -55,9 +62,10 @@ export default function Check() {
                 <Label>Department</Label>
                 <Select value={department} onValueChange={setDepartment}>
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue placeholder="None" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value={NONE}>None</SelectItem>
                     <SelectItem value="Sales">Sales</SelectItem>
                     <SelectItem value="Marketing">Marketing</SelectItem>
                     <SelectItem value="HR">HR</SelectItem>
@@ -71,13 +79,15 @@ export default function Check() {
                 <Label>Policy Type</Label>
                 <Select value={type} onValueChange={setType}>
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue placeholder="None" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value={NONE}>None</SelectItem>
                     <SelectItem value="confidentiality">Confidentiality</SelectItem>
                     <SelectItem value="external_communication">External Comm</SelectItem>
                     <SelectItem value="data_privacy">Data Privacy</SelectItem>
                     <SelectItem value="security">Security</SelectItem>
+                    <SelectItem value="hr">HR</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

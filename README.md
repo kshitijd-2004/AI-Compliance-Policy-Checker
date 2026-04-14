@@ -27,7 +27,8 @@ Similar pipelines are used in legal tech, enterprise governance tools, HR automa
 - **PDF Policy Ingestion**: Uploads PDF documents, extracts text using PyMuPDF, splits into overlapping chunks, and stores both relational records (PostgreSQL) and vector embeddings (Pinecone).
 - **Semantic Retrieval**: Uses OpenAI `text-embedding-3-small` to embed query text and retrieve the most relevant policy chunks from Pinecone, optionally filtered by department or policy type.
 - **LLM-Based Compliance Analysis**: Sends retrieved policy context and draft text to `gpt-4.1-mini` with a structured output contract, returning overall risk level, specific issues, and a suggested compliant rewrite.
-- **Orchestrated Pipeline via LangGraph**: The retrieval and analysis steps are modeled as a `StateGraph`, making the workflow explicit and extensible.
+- **Orchestrated Pipeline via LangGraph**: The classification, retrieval, and analysis steps are modeled as a `StateGraph` with conditional routing — the graph skips the LLM analysis node entirely when no relevant policy chunks are found.
+- **Auto-Classification**: When a user doesn't specify department or policy type, an LLM-powered classification node infers them from the draft text before retrieval.
 - **Audit Logging**: Every compliance check is persisted to PostgreSQL with the input text, risk level, issues (stored as JSONB), and suggested rewrite — enabling full auditability.
 - **REST API**: FastAPI backend exposes endpoints for policy upload, compliance checking, log retrieval, and system health.
 - **React Frontend**: A multi-page UI with a compliance check form, policy upload interface, audit history table, and a dashboard with risk distribution charts (Recharts).
@@ -37,26 +38,42 @@ Similar pipelines are used in legal tech, enterprise governance tools, HR automa
 
 ## Architecture
 
-### Pipeline
+### Compliance Pipeline (LangGraph StateGraph)
 
 ```
-User Input (draft text)
+User Input (draft text, optional department/policy_type)
         │
         ▼
 [ FastAPI: POST /compliance/check ]
         │
         ▼
-[ LangGraph: StateGraph ]
-   │
-   ├─ Node 1: query_policy_chunks
-   │    └─ Embed input text (OpenAI text-embedding-3-small)
-   │    └─ Query Pinecone index (top-k, with metadata filters)
-   │    └─ Concatenate retrieved chunk texts into context
-   │
-   └─ Node 2: analyze_and_rewrite
-        └─ Prompt gpt-4.1-mini with draft + policy context
-        └─ Parse structured JSON response
-        └─ Return: overall_risk, issues[], suggested_text
+┌─────────────────────────────────────────────────────┐
+│  LangGraph: StateGraph                              │
+│                                                     │
+│  Node 1: classify_content                           │
+│    ├─ If department & policy_type provided → pass    │
+│    └─ Otherwise → LLM infers them (gpt-4.1-mini)   │
+│           │                                         │
+│           ▼                                         │
+│  Node 2: retrieve_policies                          │
+│    └─ Embed input (text-embedding-3-small)          │
+│    └─ Query Pinecone (top-k, metadata filters)      │
+│    └─ Concatenate retrieved chunk texts              │
+│           │                                         │
+│           ▼                                         │
+│  ┌── Conditional Edge ──┐                           │
+│  │ matches found?       │                           │
+│  │                      │                           │
+│  ▼ YES                  ▼ NO                        │
+│  Node 3a:               Node 3b:                    │
+│  analyze_and_rewrite    no_context_response          │
+│  └─ LLM compliance      └─ Return NONE risk,       │
+│     review + rewrite       no issues (skip LLM)     │
+│  │                      │                           │
+│  └──────────┬───────────┘                           │
+│             ▼                                       │
+│            END                                      │
+└─────────────────────────────────────────────────────┘
         │
         ▼
 [ FastAPI: persist ComplianceCheck to PostgreSQL ]
@@ -86,7 +103,7 @@ Sliding window chunking (2000 chars, 200 overlap)
 | Component | Role |
 |-----------|------|
 | **FastAPI** | REST API layer; request validation via Pydantic; routing |
-| **LangGraph** | Orchestrates the two-step retrieve → analyze workflow |
+| **LangGraph** | Orchestrates the classify → retrieve → analyze workflow with conditional routing |
 | **OpenAI API** | Embeddings (`text-embedding-3-small`) and chat completion (`gpt-4.1-mini`) |
 | **Pinecone** | Hosted vector database for semantic policy chunk retrieval |
 | **PostgreSQL** | Relational store for policy documents, chunks, and compliance audit logs |
@@ -100,7 +117,7 @@ Sliding window chunking (2000 chars, 200 overlap)
 
 **Backend**
 - Python, FastAPI, Uvicorn
-- LangGraph (workflow orchestration)
+- LangGraph (workflow orchestration with conditional edges)
 - OpenAI Python SDK (embeddings + chat completions)
 - Pinecone (vector search)
 - SQLAlchemy + PostgreSQL
@@ -114,7 +131,8 @@ Sliding window chunking (2000 chars, 200 overlap)
 - TanStack Query (server state), wouter (routing)
 - Recharts (data visualization)
 
-**Infrastructure / Tooling**
+**Infrastructure**
+- Docker + Docker Compose
 - PostgreSQL (local or hosted)
 - Pinecone (hosted vector DB)
 - OpenAI API
@@ -129,13 +147,17 @@ Sliding window chunking (2000 chars, 200 overlap)
 
 2. **Compliance Check**: The user pastes a draft message into the Check page, selects `HR` as the department, and submits.
 
-3. **Retrieval**: The draft text is embedded and queried against Pinecone with a `department=HR` metadata filter. The top 5 most semantically similar policy chunks are retrieved.
+3. **Classification**: The LangGraph pipeline starts. Since the user provided a department, the classification node passes through. If neither department nor policy type were given, the LLM would auto-classify them.
 
-4. **LLM Analysis**: The retrieved chunks and the draft are sent to `gpt-4.1-mini` with a prompt instructing it to identify compliance issues, assign an overall risk level (`low`, `medium`, `high`), and produce a revised version of the text.
+4. **Retrieval**: The draft text is embedded and queried against Pinecone with a `department=HR` metadata filter. The top 5 most semantically similar policy chunks are retrieved.
 
-5. **Structured Response**: The LLM returns a JSON object matching the `ComplianceCheckResponse` schema. This is validated, returned to the client, and logged to PostgreSQL.
+5. **Conditional Routing**: The graph checks whether any policy chunks were returned. If retrieval found matches, the pipeline continues to LLM analysis. If not, it returns a clean "no issues" response without wasting an LLM call.
 
-6. **Audit Trail**: The compliance check appears in the History page, filterable by department, risk level, and date. The Dashboard updates its risk distribution chart.
+6. **LLM Analysis**: The retrieved chunks and the draft are sent to `gpt-4.1-mini` with a prompt instructing it to identify compliance issues, assign an overall risk level (`low`, `medium`, `high`), and produce a revised version of the text.
+
+7. **Structured Response**: The LLM returns a JSON object matching the `ComplianceCheckResponse` schema. This is validated, returned to the client, and logged to PostgreSQL.
+
+8. **Audit Trail**: The compliance check appears in the History page, filterable by department, risk level, and date. The Dashboard updates its risk distribution chart.
 
 ---
 
@@ -147,22 +169,34 @@ Sliding window chunking (2000 chars, 200 overlap)
 │   ├── database.py              # SQLAlchemy engine, session factory
 │   ├── models.py                # ORM models: PolicyDocument, PolicyChunk, ComplianceCheck
 │   ├── schemas.py               # Pydantic DTOs for requests and responses
-│   ├── agent_graph.py           # LangGraph StateGraph definition
+│   ├── get_db.py                # Shared database session dependency
+│   ├── agent_graph.py           # LangGraph StateGraph with classify → retrieve → analyze
 │   ├── vectorstore.py           # Pinecone client, embed + upsert + query
 │   ├── ingestion.py             # PDF extraction, chunking, DB + vector persistence
-│   ├── routers_policies.py      # /policies/ endpoints (upload, list)
+│   ├── routers_policies.py      # /policies/ endpoints (upload, list, delete, download)
 │   ├── routers_compliance.py    # /compliance/ endpoints (check, logs)
 │   ├── routers_health.py        # /health/ endpoint (DB + Pinecone status)
 │   └── tests/                   # pytest test suite
+│       ├── conftest.py          # Test fixtures, SQLite override
+│       ├── test_compliance.py   # Compliance check flow tests
+│       ├── test_policies.py     # Policy upload + list tests
+│       ├── test_logs.py         # Log filtering tests
+│       ├── test_health.py       # Health endpoint tests
+│       └── test_validation.py   # Schema validation tests
 │
 ├── frontend/
 │   ├── src/
-│   │   ├── pages/               # Home, Check, Policies, History (React pages)
+│   │   ├── pages/               # Home, Check, Policies, History
 │   │   ├── components/          # Layout, RiskBadge, UI primitives
-│   │   └── lib/api.ts           # Fetch client for FastAPI endpoints
+│   │   └── lib/api.ts           # Typed fetch client for FastAPI endpoints
 │   ├── package.json
-│   └── vite.config.js
+│   ├── vite.config.js
+│   └── Dockerfile
 │
+├── Dockerfile                   # Backend container
+├── docker-compose.yml           # Full-stack: backend + PostgreSQL + frontend
+├── requirements.txt             # Python dependencies with version ranges
+├── .env.example                 # Required environment variables template
 └── storage/policies/            # Runtime PDF storage (gitignored)
 ```
 
@@ -172,42 +206,44 @@ Sliding window chunking (2000 chars, 200 overlap)
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.11+
 - Node.js 18+
 - PostgreSQL database (local or hosted)
 - Pinecone account with an index created
 - OpenAI API key
 
-### Backend Setup
+### Quick Start with Docker
 
 ```bash
-# Create and activate a virtual environment
+# Copy and fill in your credentials
+cp .env.example .env
+
+# Start everything (backend + PostgreSQL + frontend)
+docker compose up --build
+```
+
+The API will be available at `http://localhost:8000` and the frontend at `http://localhost:5173`.
+
+### Manual Setup
+
+**Backend:**
+
+```bash
 python -m venv .venv
 .venv\Scripts\activate        # Windows
 # source .venv/bin/activate   # macOS/Linux
 
-# Install dependencies (no requirements.txt yet — see Current Status)
-pip install fastapi uvicorn sqlalchemy psycopg2-binary pydantic pydantic-settings \
-    openai langgraph pinecone PyMuPDF pytest httpx
-```
+pip install -r requirements.txt
 
-Create a `.env` file in the project root:
+cp .env.example .env
+# Edit .env with your credentials
 
-```env
-DATABASE_URL=postgresql://user:password@localhost:5432/compliance_db
-OPENAI_API_KEY=sk-...
-PINECONE_API_KEY=...
-PINECONE_INDEX_NAME=your-index-name
-```
-
-```bash
-# Start the backend
 uvicorn app.main:app --reload
 ```
 
 The API will be available at `http://127.0.0.1:8000`. Tables are created automatically on startup via `Base.metadata.create_all`.
 
-### Frontend Setup
+**Frontend:**
 
 ```bash
 cd frontend
@@ -225,31 +261,9 @@ pytest app/tests/
 
 ---
 
-## Current Status
-
-This is a **working prototype** focused on validating the core pipeline: policy ingestion, semantic retrieval, LLM-based compliance evaluation, and audit logging. The primary data flow is functional end-to-end.
-
-**Implemented:**
-- Full ingestion pipeline (PDF → chunks → PostgreSQL + Pinecone)
-- LangGraph workflow with retrieval and LLM analysis nodes
-- Compliance check API with structured output validation and audit logging
-- Policy and compliance log REST endpoints
-- React frontend with check form, policy list, audit history, and dashboard charts
-- System health endpoint covering both DB and vector store
-
-**Not yet complete:**
-- No `requirements.txt` or `pyproject.toml` — dependency management is manual
-- No Docker or deployment configuration
-- No `.env.example` — environment setup is undocumented in the repo
-- An auto-classify feature (`classify_context_with_llm`) is implemented but not connected to any route
-
----
-
 ## Future Improvements
 
-1. **Dependency management**: Add `requirements.txt` or `pyproject.toml` with pinned versions for reproducible installs.
-2. **Deployment**: Containerize with Docker and Docker Compose (FastAPI + PostgreSQL); add a deployment target (Railway, Render, or AWS ECS).
-3. **Evaluation framework**: Add offline evaluation of LLM compliance decisions using labeled examples to measure accuracy and calibrate risk thresholds.
-4. **Multi-branch LangGraph workflow**: Extend the graph to support routing (e.g., auto-classify policy type, run domain-specific sub-checks, handle ambiguous cases with a fallback node).
-5. **Authentication and multi-tenancy**: Add user authentication and department-scoped policy namespaces so different teams manage their own policy sets independently.
-6. **Streaming responses**: Use OpenAI streaming and Server-Sent Events to surface partial LLM output to the UI progressively, improving perceived latency on longer documents.
+1. **Evaluation framework**: Add offline evaluation of LLM compliance decisions using labeled examples to measure accuracy and calibrate risk thresholds.
+2. **Streaming responses**: Use OpenAI streaming and Server-Sent Events to surface partial LLM output to the UI progressively, improving perceived latency on longer documents.
+3. **Authentication and multi-tenancy**: Add user authentication and department-scoped policy namespaces so different teams manage their own policy sets independently.
+4. **Extended graph routing**: Add domain-specific sub-checks (e.g., a dedicated PII detection node) and a fallback node for ambiguous cases.

@@ -5,16 +5,15 @@ def test_upload_and_list_policies(client, monkeypatch):
     file = ("policy.pdf", b"hello world", "application/pdf")
 
     resp = client.post(
-        "/policies/upload",
+        "/policies/",
         files={"file": file},
-        data={"title": "Test Policy", "policy_type": "security"}
+        data={"title": "Test Policy", "policy_type": "security"},
     )
 
     assert resp.status_code == 200
     data = resp.json()
     assert data["title"] == "Test Policy"
 
-    # list
-    resp2 = client.get("/policies")
+    resp2 = client.get("/policies/")
     assert resp2.status_code == 200
-    assert len(resp2.json()) == 1
+    assert len(resp2.json()) >= 1

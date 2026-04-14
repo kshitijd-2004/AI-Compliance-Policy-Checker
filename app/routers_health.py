@@ -1,6 +1,7 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import text
-from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.vectorstore import index
@@ -8,30 +9,22 @@ from app.vectorstore import index
 router = APIRouter(prefix="/health", tags=["health"])
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
 @router.get("/")
-def health_check():
+def health_check() -> dict[str, object]:
     db_ok = False
     pinecone_ok = False
 
-    # Check DB
     try:
-        db = next(get_db())
-        db.execute(text("SELECT 1"))
-        db_ok = True
+        db = SessionLocal()
+        try:
+            db.execute(text("SELECT 1"))
+            db_ok = True
+        finally:
+            db.close()
     except Exception:
         db_ok = False
 
-    # Check Pinecone
     try:
-        # cheap-ish call to verify connectivity
         index.describe_index_stats()
         pinecone_ok = True
     except Exception:

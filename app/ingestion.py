@@ -1,27 +1,32 @@
-from typing import List
-from app import models
+from __future__ import annotations
+
 import fitz
 from sqlalchemy.orm import Session
+
+from app import models
 from app.vectorstore import index_policy_chunks
 
 
 def extract_text_from_pdf(file_path: str) -> str:
-    """Extract text from a PDF file using PyMuPDF (fitz)"""
+    """Extract text from a PDF file using PyMuPDF."""
     doc = fitz.open(file_path)
-    texts: List[str] = []
+    texts: list[str] = []
     for page in doc:
         texts.append(page.get_text())
     return "\n".join(texts)
 
-def split_text_into_chunks(text: str, chunk_size: int = 2000, overlap: int = 200) -> list[str]:
-    """Split text into chunks of a specified size"""
+
+def split_text_into_chunks(
+    text: str,
+    chunk_size: int = 2000,
+    overlap: int = 200,
+) -> list[str]:
+    """Split text into overlapping chunks of a specified size."""
     text = text.strip()
     if not text:
-            return []
+        return []
 
     n = len(text)
-
-    # If text is shorter than one chunk, just return it as a single chunk
     if n <= chunk_size:
         return [text]
 
@@ -35,37 +40,35 @@ def split_text_into_chunks(text: str, chunk_size: int = 2000, overlap: int = 200
             chunks.append(chunk)
 
         if end == n:
-            # we've reached the end, stop
             break
 
         next_start = end - overlap
-        # safety: ensure progress
         if next_start <= start:
-            next_start = end  # no overlap if it would go backwards / stay same
+            next_start = end
 
         start = next_start
 
     return chunks
-def ingest_policy_document(db: Session, document_id: int) -> None:
-    """Extract text from a PDF, split into chunks, and save to the database"""
-    doc = db.get(models.PolicyDocument, document_id)
 
+
+def ingest_policy_document(db: Session, document_id: int) -> None:
+    """Extract text from a PDF, split into chunks, and persist to DB + Pinecone."""
+    doc = db.get(models.PolicyDocument, document_id)
     if not doc:
         return
-    
+
     text = extract_text_from_pdf(doc.file_path)
     chunks = split_text_into_chunks(text)
-    
+
     for chunk in chunks:
         policy_chunk = models.PolicyChunk(
             document_id=document_id,
-            text=chunk
+            text=chunk,
         )
         db.add(policy_chunk)
 
     db.commit()
 
-    # store doc chunks in Pinecone
     db.refresh(doc)
     doc_chunks = (
         db.query(models.PolicyChunk)
@@ -73,5 +76,3 @@ def ingest_policy_document(db: Session, document_id: int) -> None:
         .all()
     )
     index_policy_chunks(doc_chunks)
-
-

@@ -1,23 +1,18 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from app.database import SessionLocal
 from app import models, schemas
 from app.ingestion import ingest_policy_document
 from app.vectorstore import delete_policy_vectors
+from app.get_db import get_db
 
 
 router = APIRouter(prefix="/policies", tags=["policies"])
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 # ---------- Storage dir ----------
 BASE_DIR = Path(__file__).resolve().parent.parent

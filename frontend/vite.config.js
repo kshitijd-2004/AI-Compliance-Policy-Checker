@@ -12,22 +12,14 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),
-      "@shared": path.resolve(__dirname, "shared"),
-      "@assets": path.resolve(__dirname, "attached_assets"),
     },
   },
 
-  css: {
-    postcss: {
-      plugins: [],
-    },
-  },
-
-  root: ".", // frontend/ is the root
+  root: ".",
   publicDir: "public",
 
   build: {
-    outDir: "dist",   // leave conventional Vite dist/
+    outDir: "dist",
     emptyOutDir: true,
   },
 
@@ -35,5 +27,5 @@ export default defineConfig({
     host: "localhost",
     port: 5173,
     strictPort: true,
-  }
+  },
 });

@@ -1,11 +1,10 @@
-Architecture
-project_idea
-app/test_db.py
 .venv/
 __pycache__/
+*.pyc
 .env
 .env.local
-storage
-app/sentinel_audit.jsonl
-sentinel_audit.jsonl
-mcp_client.py
+storage/
+app/test_db.py
+node_modules/
+dist/
+.DS_Store
